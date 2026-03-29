@@ -1,4 +1,3 @@
-2. Код к алгоритму работы манипулятора робота
 #pragma config(Sensor, port1,  distanceSensor,  sensorVexIQ_Distance)
 #pragma config(Sensor, port2,  colorSensor,     sensorVexIQ_ColorHue)
 #pragma config(Sensor, port5,  gyroSensor,      sensorVexIQ_Gyro)
