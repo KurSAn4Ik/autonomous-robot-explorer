@@ -1,0 +1,157 @@
+2. Код к алгоритму работы манипулятора робота
+#pragma config(Sensor, port1,  distanceSensor,  sensorVexIQ_Distance)
+#pragma config(Sensor, port2,  colorSensor,     sensorVexIQ_ColorHue)
+#pragma config(Sensor, port5,  gyroSensor,      sensorVexIQ_Gyro)
+#pragma config(Sensor, port6,  touchLED,        sensorVexIQ_LED)
+#pragma config(Sensor, port7,  touchLED2,       sensorVexIQ_LED)
+#pragma config(Sensor, port9,  leftRearBumper,  sensorVexIQ_Touch)
+#pragma config(Sensor, port10, rightRearBumper, sensorVexIQ_Touch)
+#pragma config(Motor,  motor3, leftMotor,       tmotorVexIQ, PIDControl, driveLeft,  encoder)
+#pragma config(Motor,  motor4, rightMotor,      tmotorVexIQ, PIDControl, reversed, driveRight, encoder)
+#pragma config(Motor,  motor11,handMotor,       tmotorVexIQ, PIDControl, encoder)
+#pragma config(Motor,  motor8, clawMotor,       tmotorVexIQ, PIDControl, encoder)
+const int DRIVE_SPEED          = 50;
+const int TURN_SPEED           = 40;
+const int ARM_UP_POWER         = 60;
+const int ARM_DOWN_POWER       = -40;
+const int CLAW_CLOSE_POWER     = -60;
+const int CLAW_OPEN_POWER      = 60;
+const int ARM_MOVE_TIMEOUT_MS  = 4000;
+const int CLAW_MOVE_TIMEOUT_MS = 2000;
+const short STATUS_FREE_COLOR     = colorGreen;
+const short STATUS_ARM_DOWN_COLOR = colorBlue;
+const short STATUS_ARM_UP_COLOR   = colorYellow;
+const short STATUS_AVOID_COLOR    = colorOrange;
+const short STATUS_BUMP_COLOR     = colorRed;
+const int SMALL_OBJ_MIN_MM     = 50;
+const int SMALL_OBJ_MAX_MM     = 150;
+const int WALL_DISTANCE_MM     = 250;
+const int ARM_UP_POS           = 0;
+const int ARM_DOWN_POS         = -1100;
+const int CLAW_CLOSED_POS      = -200;
+const int CLAW_OPEN_POS        = 0;
+void stopDrive() {
+motor[leftMotor]  = 0;
+motor[rightMotor] = 0;
+}
+void setStatusColor(short c) {
+setTouchLEDColor(touchLED2, c);
+}
+void driveForward(int power) {
+motor[leftMotor]  = power;
+motor[rightMotor] = power;
+}
+void driveBackward(int power) {
+motor[leftMotor]  = -power;
+motor[rightMotor] = -power;
+}
+bool rearBumped();
+void moveArmTo(int targetPos, int powerUp, int powerDown) {
+clearTimer(T1);
+while (abs(getMotorEncoder(handMotor) - targetPos) > 5 &&
+time1[T1] < ARM_MOVE_TIMEOUT_MS) {
+if (getMotorEncoder(handMotor) < targetPos) {
+motor[handMotor] = powerUp;
+} else {
+motor[handMotor] = powerDown;
+}
+}
+motor[handMotor] = 0;
+}
+void moveClawTo(int targetPos, int powerClose, int powerOpen) {
+clearTimer(T2);
+while (abs(getMotorEncoder(clawMotor) - targetPos) > 5 &&
+time1[T2] < CLAW_MOVE_TIMEOUT_MS) {
+if (getMotorEncoder(clawMotor) < targetPos) {
+motor[clawMotor] = powerClose;
+} else {
+motor[clawMotor] = powerOpen;
+}
+}
+motor[clawMotor] = 0;
+}
+void setSearchPose() {
+moveArmTo(ARM_UP_POS, ARM_UP_POWER, ARM_DOWN_POWER);
+moveClawTo(CLAW_OPEN_POS, CLAW_OPEN_POWER, CLAW_CLOSE_POWER);
+}
+void grabObjectSequence() {
+stopDrive();
+setStatusColor(STATUS_ARM_DOWN_COLOR);
+moveArmTo(ARM_DOWN_POS, ARM_UP_POWER, ARM_DOWN_POWER);
+wait1Msec(200);
+moveClawTo(CLAW_CLOSED_POS, CLAW_CLOSE_POWER, CLAW_OPEN_POWER);
+wait1Msec(200);
+setStatusColor(STATUS_ARM_UP_COLOR);
+moveArmTo(ARM_UP_POS, ARM_UP_POWER, ARM_DOWN_POWER);
+wait1Msec(200);
+moveClawTo(CLAW_OPEN_POS, CLAW_OPEN_POWER, CLAW_CLOSE_POWER);
+setStatusColor(STATUS_FREE_COLOR);
+}
+void avoidObstacle() {
+stopDrive();
+setStatusColor(STATUS_AVOID_COLOR);
+driveBackward(40);
+if (rearBumped()) setStatusColor(STATUS_BUMP_COLOR);
+wait1Msec(700);
+stopDrive();
+setStatusColor(STATUS_AVOID_COLOR);
+motor[leftMotor]  = TURN_SPEED;
+motor[rightMotor] = TURN_SPEED / 5;
+wait1Msec(1000);
+stopDrive();
+setStatusColor(STATUS_FREE_COLOR);
+}
+bool rearBumped() {
+return (SensorValue[leftRearBumper] == 1 || SensorValue[rightRearBumper] == 1);
+}
+task main() {
+resetMotorEncoder(handMotor);
+resetMotorEncoder(clawMotor);
+SensorValue[gyroSensor] = 0;
+setSearchPose();
+bool isPaused = false;
+int  lastTouchState = 0;
+setTouchLEDColor(touchLED, colorNone);
+setStatusColor(STATUS_FREE_COLOR);
+while (true) {
+    int dist = SensorValue[distanceSensor];
+    int touchState = SensorValue[touchLED];
+    if (touchState == 1  && lastTouchState == 0) {
+        isPaused = !isPaused;
+        if (isPaused) {
+            setTouchLEDColor(touchLED, colorRed);
+        } else {
+            setTouchLEDColor(touchLED, colorNone);
+        }
+    }
+    lastTouchState = touchState;
+    if (isPaused) {
+        stopDrive();
+        wait1Msec(20);
+        continue;
+    }
+    if (rearBumped()) {
+        setStatusColor(STATUS_BUMP_COLOR);
+        driveForward(40);
+        wait1Msec(500);
+        stopDrive();
+        avoidObstacle();
+    }
+    else if (dist  >= SMALL_OBJ_MIN_MM  && dist  <= SMALL_OBJ_MAX_MM) {
+        grabObjectSequence();
+        setSearchPose();
+    }
+    else if  (dist  > 0  && dist  < WALL_DISTANCE_MM) {
+        avoidObstacle();
+        setSearchPose();
+    }
+    else {
+        setStatusColor(STATUS_FREE_COLOR);
+        if (abs(getMotorEncoder(handMotor) - ARM_UP_POS)  > 20) {
+            moveArmTo(ARM_UP_POS, ARM_UP_POWER, ARM_DOWN_POWER);
+        }
+        driveForward(DRIVE_SPEED);
+    }
+    wait1Msec(50);
+}
+}
